@@ -4,7 +4,7 @@ import { Problem, CphSubmitResponse, CphEmptyResponse } from './types';
 import { saveProblem } from './parser';
 import * as vscode from 'vscode';
 import path from 'path';
-import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { isCodeforcesUrl, randomId } from './utils';
 import {
     getDefaultLangPref,
@@ -19,6 +19,7 @@ import { getJudgeViewProvider } from './extension';
 import { words_in_text } from './utilsPure';
 import telmetry from './telmetry';
 import os from 'os';
+import { exec } from 'child_process';
 
 const emptyResponse: CphEmptyResponse = { empty: true };
 let savedResponse: CphEmptyResponse | CphSubmitResponse = emptyResponse;
@@ -210,7 +211,7 @@ const handleNewProblem = async (problem: Problem) => {
         problem.name = splitUrl[splitUrl.length - 1];
     }
     const problemFileName = getProblemFileName(problem, extn);
-    const srcPath = path.join(folder, problemFileName);
+    let srcPath = path.join(folder, problemFileName);
 
     // Add fields absent in competitive companion.
     problem.srcPath = srcPath;
@@ -218,6 +219,44 @@ const handleNewProblem = async (problem: Problem) => {
         ...testcase,
         id: randomId(),
     }));
+    if (extn == 'rs') {
+        const srcFolder = path.dirname(srcPath);
+        srcPath = path.join(
+            srcFolder,
+            problemFileName.split('.')[0],
+            'src',
+            'main.rs',
+        );
+        exec(
+            `cargo new ${folder}/${problemFileName.split('.')[0]} `,
+            (err, stdout, stderr) => {
+                console.log(stderr, stdout, err);
+            },
+        );
+        const dotvscodePath = path.join(
+            vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? '',
+            '.vscode',
+        );
+        if (!existsSync(dotvscodePath)) {
+            mkdirSync('.vscode');
+        }
+        const settingsPath = path.join(dotvscodePath, 'settings.json');
+        if (!existsSync(settingsPath)) {
+            writeFileSync(settingsPath, '{}');
+        }
+        const settings = JSON.parse(readFileSync(settingsPath).toString());
+        console.log(`settings: ${JSON.stringify(settings)}`);
+        let rustAnalyzerFolders: any[] = [];
+        if ('rust-analyzer.linkedProjects' in settings) {
+            rustAnalyzerFolders = settings['rust-analyzer.linkedProjects'];
+        }
+        rustAnalyzerFolders.push(
+            path.join(srcFolder, problemFileName.split('.')[0], 'Cargo.toml'),
+        );
+        settings['rust-analyzer.linkedProjects'] = rustAnalyzerFolders;
+        console.log(settings);
+        writeFileSync(settingsPath, JSON.stringify(settings, null, 4));
+    }
     if (!existsSync(srcPath)) {
         writeFileSync(srcPath, '');
     }
